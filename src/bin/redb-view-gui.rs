@@ -5,13 +5,18 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use eframe::egui::{self, Color32, CursorIcon, RichText, ScrollArea, Sense, Vec2, Visuals};
+use eframe::egui::{self, Color32, CursorIcon, RichText, ScrollArea, Sense, TextWrapMode, Vec2, Visuals};
 use eframe::{NativeOptions, Theme};
 use redb_view::{DatabaseView, DisplayValue, KvRow, TableInfo, TableKind, ViewError};
 
 const SPLITTER_THICKNESS: f32 = 6.0;
 const MIN_ROW_PANEL_HEIGHT: f32 = 100.0;
 const MIN_DETAIL_PANEL_HEIGHT: f32 = 100.0;
+const DEFAULT_ZOOM: f32 = 1.35;
+const MIN_ZOOM: f32 = 0.85;
+const MAX_ZOOM: f32 = 2.5;
+const ZOOM_STEP: f32 = 0.1;
+const C0_DIVIDER: &str = " | ";
 
 fn main() -> eframe::Result<()> {
     // follow_system_theme: needed on Linux so OS theme reaches frame.info().system_theme.
@@ -72,11 +77,14 @@ struct App {
     theme: ThemeChoice,
     /// Height of the row-list pane above the horizontal splitter.
     row_panel_height: f32,
+    /// Global UI zoom (`pixels_per_point` multiplier around egui’s baseline).
+    zoom: f32,
 }
 
 impl App {
     fn new() -> Self {
         let theme = load_theme_choice();
+        let zoom = load_zoom();
         Self {
             path: String::new(),
             db: None,
@@ -89,6 +97,7 @@ impl App {
             status: "Press Open database and choose a .redb or .db file.".to_owned(),
             theme,
             row_panel_height: 280.0,
+            zoom,
         }
     }
 
@@ -211,6 +220,18 @@ impl App {
         save_theme_choice(theme);
     }
 
+    fn zoom_in(&mut self) {
+        self.zoom = ((self.zoom + ZOOM_STEP) * 20.0).round() / 20.0;
+        self.zoom = self.zoom.clamp(MIN_ZOOM, MAX_ZOOM);
+        save_zoom(self.zoom);
+    }
+
+    fn zoom_out(&mut self) {
+        self.zoom = ((self.zoom - ZOOM_STEP) * 20.0).round() / 20.0;
+        self.zoom = self.zoom.clamp(MIN_ZOOM, MAX_ZOOM);
+        save_zoom(self.zoom);
+    }
+
     fn apply_theme(&self, ctx: &egui::Context, frame: &eframe::Frame) {
         let visuals = match self.theme {
             ThemeChoice::Light => Visuals::light(),
@@ -227,6 +248,7 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.apply_theme(ctx, frame);
+        ctx.set_pixels_per_point(self.zoom);
 
         egui::TopBottomPanel::top("open_bar").show(ctx, |ui| {
             ui.add_space(8.0);
@@ -249,6 +271,14 @@ impl eframe::App for App {
                                 }
                             }
                         });
+                    ui.add_space(8.0);
+                    ui.label(format!("{}%", (self.zoom * 100.0).round() as i32));
+                    if ui.button("Zoom out").clicked() {
+                        self.zoom_out();
+                    }
+                    if ui.button("Zoom in").clicked() {
+                        self.zoom_in();
+                    }
                 });
             });
             ui.label("Open a local database file, pick a table, then browse its rows.");
@@ -324,15 +354,17 @@ impl eframe::App for App {
                 .row_panel_height
                 .clamp(MIN_ROW_PANEL_HEIGHT, max_row_height);
 
-            // Top: row list
+            // Top: row list — full width, horizontal + vertical scroll, no early "…"
             ui.allocate_ui_with_layout(
                 Vec2::new(available.x, self.row_panel_height),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
-                    ScrollArea::vertical()
+                    ScrollArea::both()
                         .id_source("row_list")
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
+                            ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
+                            ui.set_min_width(ui.available_width());
                             if self.rows.is_empty() {
                                 ui.label("No rows to show.");
                                 return;
@@ -359,28 +391,23 @@ impl eframe::App for App {
                 Sense::click_and_drag(),
             );
             let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
-            ui.painter().hline(
-                split_rect.x_range(),
-                split_rect.center().y,
-                stroke,
-            );
+            ui.painter()
+                .hline(split_rect.x_range(), split_rect.center().y, stroke);
             if split_response.hovered() || split_response.dragged() {
                 ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
             }
             if split_response.dragged() {
-                self.row_panel_height =
-                    (self.row_panel_height + split_response.drag_delta().y).clamp(
-                        MIN_ROW_PANEL_HEIGHT,
-                        max_row_height,
-                    );
+                self.row_panel_height = (self.row_panel_height + split_response.drag_delta().y)
+                    .clamp(MIN_ROW_PANEL_HEIGHT, max_row_height);
             }
 
-            // Bottom: detail (UTF-8 text only — never hex)
+            // Bottom: detail (UTF-8 text only — never hex; C0 sanitized for display)
             ui.heading("Details");
-            ScrollArea::vertical()
+            ScrollArea::both()
                 .id_source("detail")
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
+                    ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
                     match self.selected_row.and_then(|i| self.rows.get(i)) {
                         Some(row) => {
                             ui.label(RichText::new(format!("Row #{}", row.index)).strong());
@@ -400,17 +427,22 @@ impl eframe::App for App {
     }
 }
 
-fn preview_value(value: &DisplayValue) -> String {
-    const MAX: usize = 48;
-    match value.text.as_deref() {
-        Some(text) if !text.is_empty() => {
-            if text.chars().count() <= MAX {
-                text.to_owned()
-            } else {
-                let trimmed: String = text.chars().take(MAX).collect();
-                format!("{trimmed}…")
-            }
+/// Display-only: keep tab/LF/CR; replace other C0 controls (e.g. U+001F) with a divider.
+fn sanitize_for_display(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for ch in raw.chars() {
+        if ch.is_control() && ch != '\t' && ch != '\n' && ch != '\r' {
+            out.push_str(C0_DIVIDER);
+        } else {
+            out.push(ch);
         }
+    }
+    out
+}
+
+fn preview_value(value: &DisplayValue) -> String {
+    match value.text.as_deref() {
+        Some(text) if !text.is_empty() => sanitize_for_display(text),
         _ => "not text".to_owned(),
     }
 }
@@ -419,7 +451,8 @@ fn show_text_value(ui: &mut egui::Ui, value: &DisplayValue) {
     ui.label(format!("Size: {} bytes", value.raw_len));
     match value.text.as_deref() {
         Some(text) if !text.is_empty() => {
-            ui.label(RichText::new(text).monospace());
+            let shown = sanitize_for_display(text);
+            ui.label(RichText::new(shown).monospace());
         }
         Some(_) => {
             ui.label(
@@ -442,9 +475,17 @@ fn plain_error(lead: &str, err: &ViewError) -> String {
     format!("{lead} ({err})")
 }
 
-fn theme_config_path() -> Option<PathBuf> {
+fn config_dir() -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
-    Some(Path::new(&home).join(".config").join("redb-view").join("theme"))
+    Some(Path::new(&home).join(".config").join("redb-view"))
+}
+
+fn theme_config_path() -> Option<PathBuf> {
+    Some(config_dir()?.join("theme"))
+}
+
+fn zoom_config_path() -> Option<PathBuf> {
+    Some(config_dir()?.join("zoom"))
 }
 
 fn load_theme_choice() -> ThemeChoice {
@@ -465,4 +506,29 @@ fn save_theme_choice(theme: ThemeChoice) {
         let _ = fs::create_dir_all(parent);
     }
     let _ = fs::write(path, theme.to_stored());
+}
+
+fn load_zoom() -> f32 {
+    let Some(path) = zoom_config_path() else {
+        return DEFAULT_ZOOM;
+    };
+    match fs::read_to_string(path) {
+        Ok(raw) => raw
+            .trim()
+            .parse::<f32>()
+            .ok()
+            .map(|z| z.clamp(MIN_ZOOM, MAX_ZOOM))
+            .unwrap_or(DEFAULT_ZOOM),
+        Err(_) => DEFAULT_ZOOM,
+    }
+}
+
+fn save_zoom(zoom: f32) {
+    let Some(path) = zoom_config_path() else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(path, format!("{zoom:.2}"));
 }
