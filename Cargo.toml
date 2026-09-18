@@ -1,0 +1,32 @@
+[package]
+name = "redb-view"
+version = "0.1.0"
+edition = "2021"
+authors = ["Jeffrey S Carr <jscarr1964@gmail.com>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/jscarr64/redb-view"
+homepage = "https://github.com/jscarr64/redb-view"
+description = "Browse redb databases: list tables and page key/value rows (CLI + library)."
+readme = "README.md"
+documentation = "https://docs.rs/redb-view"
+keywords = ["redb", "database", "browser", "viewer"]
+categories = ["database", "command-line-utilities", "development-tools"]
+
+[dependencies]
+redb = "4.3"
+eframe = { version = "0.28", optional = true }
+egui = { version = "0.28", optional = true }
+rfd = { version = "0.15", optional = true }
+
+[features]
+default = []
+gui = ["dep:eframe", "dep:egui", "dep:rfd"]
+
+[[bin]]
+name = "redb-view"
+path = "src/bin/redb-view.rs"
+
+[[bin]]
+name = "redb-view-gui"
+path = "src/bin/redb-view-gui.rs"
+required-features = ["gui"]
