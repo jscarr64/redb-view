@@ -5,14 +5,16 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use eframe::egui::{self, Color32, RichText, ScrollArea, Visuals};
+use eframe::egui::{self, RichText, ScrollArea, Visuals};
 use eframe::{NativeOptions, Theme};
 use redb_view::{DatabaseView, DisplayValue, KvRow, TableInfo, TableKind, ViewError};
 
 fn main() -> eframe::Result<()> {
-    let mut options = NativeOptions::default();
-    // Needed on Linux so OS theme changes reach `frame.info().system_theme`.
-    options.follow_system_theme = true;
+    // follow_system_theme: needed on Linux so OS theme reaches frame.info().system_theme.
+    let options = NativeOptions {
+        follow_system_theme: true,
+        ..NativeOptions::default()
+    };
     eframe::run_native(
         "redb View",
         options,
@@ -259,7 +261,7 @@ impl eframe::App for App {
                 }
             });
             ui.add_space(4.0);
-            ui.label(RichText::new(&self.status).color(Color32::from_rgb(40, 40, 40)));
+            ui.label(RichText::new(&self.status).weak());
             ui.add_space(6.0);
         });
 

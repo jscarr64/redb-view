@@ -36,3 +36,5 @@ cargo run --features gui --bin redb-view-gui
 ```
 
 Open a local `.redb` file, pick a table, then page through rows. The GUI talks only to this crate’s library API (never imports `redb` directly).
+
+The GUI opens a native file picker (`.redb` / `.db`). Theme menu: **System** (default, follows the OS), **Light**, or **Dark**. The theme choice is saved under `~/.config/redb-view/theme`.
