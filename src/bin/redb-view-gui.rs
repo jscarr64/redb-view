@@ -5,9 +5,13 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use eframe::egui::{self, RichText, ScrollArea, Visuals};
+use eframe::egui::{self, Color32, CursorIcon, RichText, ScrollArea, Sense, Vec2, Visuals};
 use eframe::{NativeOptions, Theme};
 use redb_view::{DatabaseView, DisplayValue, KvRow, TableInfo, TableKind, ViewError};
+
+const SPLITTER_THICKNESS: f32 = 6.0;
+const MIN_ROW_PANEL_HEIGHT: f32 = 100.0;
+const MIN_DETAIL_PANEL_HEIGHT: f32 = 100.0;
 
 fn main() -> eframe::Result<()> {
     // follow_system_theme: needed on Linux so OS theme reaches frame.info().system_theme.
@@ -66,6 +70,8 @@ struct App {
     selected_row: Option<usize>,
     status: String,
     theme: ThemeChoice,
+    /// Height of the row-list pane above the horizontal splitter.
+    row_panel_height: f32,
 }
 
 impl App {
@@ -82,6 +88,7 @@ impl App {
             selected_row: None,
             status: "Press Open database and choose a .redb or .db file.".to_owned(),
             theme,
+            row_panel_height: 280.0,
         }
     }
 
@@ -235,10 +242,7 @@ impl eframe::App for App {
                                 ThemeChoice::Dark,
                             ] {
                                 if ui
-                                    .selectable_label(
-                                        self.theme == choice,
-                                        choice.as_label(),
-                                    )
+                                    .selectable_label(self.theme == choice, choice.as_label())
                                     .clicked()
                                 {
                                     self.set_theme(choice);
@@ -265,9 +269,11 @@ impl eframe::App for App {
             ui.add_space(6.0);
         });
 
+        // Left/right: tables vs main view — native egui resizable side panel.
         egui::SidePanel::left("tables")
             .resizable(true)
             .default_width(220.0)
+            .width_range(140.0..=520.0)
             .show(ctx, |ui| {
                 ui.heading("Tables");
                 if self.tables.is_empty() {
@@ -309,79 +315,127 @@ impl eframe::App for App {
                     self.go_next_page();
                 }
             });
+            ui.add_space(4.0);
 
-            ui.separator();
+            let available = ui.available_size();
+            let max_row_height =
+                (available.y - SPLITTER_THICKNESS - MIN_DETAIL_PANEL_HEIGHT).max(MIN_ROW_PANEL_HEIGHT);
+            self.row_panel_height = self
+                .row_panel_height
+                .clamp(MIN_ROW_PANEL_HEIGHT, max_row_height);
 
+            // Top: row list
+            ui.allocate_ui_with_layout(
+                Vec2::new(available.x, self.row_panel_height),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ScrollArea::vertical()
+                        .id_source("row_list")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            if self.rows.is_empty() {
+                                ui.label("No rows to show.");
+                                return;
+                            }
+                            for (i, row) in self.rows.iter().enumerate() {
+                                let preview = format!(
+                                    "#{}  key: {}  |  value: {}",
+                                    row.index,
+                                    preview_value(&row.key),
+                                    preview_value(&row.value)
+                                );
+                                let selected = self.selected_row == Some(i);
+                                if ui.selectable_label(selected, preview).clicked() {
+                                    self.selected_row = Some(i);
+                                }
+                            }
+                        });
+                },
+            );
+
+            // Horizontal splitter (row list ↔ detail)
+            let (split_rect, split_response) = ui.allocate_exact_size(
+                Vec2::new(ui.available_width(), SPLITTER_THICKNESS),
+                Sense::click_and_drag(),
+            );
+            let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
+            ui.painter().hline(
+                split_rect.x_range(),
+                split_rect.center().y,
+                stroke,
+            );
+            if split_response.hovered() || split_response.dragged() {
+                ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
+            }
+            if split_response.dragged() {
+                self.row_panel_height =
+                    (self.row_panel_height + split_response.drag_delta().y).clamp(
+                        MIN_ROW_PANEL_HEIGHT,
+                        max_row_height,
+                    );
+            }
+
+            // Bottom: detail (UTF-8 text only — never hex)
+            ui.heading("Details");
             ScrollArea::vertical()
-                .id_source("row_list")
-                .max_height(280.0)
+                .id_source("detail")
+                .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    if self.rows.is_empty() {
-                        ui.label("No rows to show.");
-                        return;
-                    }
-                    for (i, row) in self.rows.iter().enumerate() {
-                        let preview = format!(
-                            "#{}  key: {}  |  value: {}",
-                            row.index,
-                            preview_value(&row.key),
-                            preview_value(&row.value)
-                        );
-                        let selected = self.selected_row == Some(i);
-                        if ui.selectable_label(selected, preview).clicked() {
-                            self.selected_row = Some(i);
+                    match self.selected_row.and_then(|i| self.rows.get(i)) {
+                        Some(row) => {
+                            ui.label(RichText::new(format!("Row #{}", row.index)).strong());
+                            ui.add_space(6.0);
+                            ui.label(RichText::new("Key").strong());
+                            show_text_value(ui, &row.key);
+                            ui.add_space(8.0);
+                            ui.label(RichText::new("Value").strong());
+                            show_text_value(ui, &row.value);
+                        }
+                        None => {
+                            ui.label("Click a row to see the full key and value.");
                         }
                     }
                 });
-
-            ui.separator();
-            ui.heading("Details");
-            ScrollArea::vertical().id_source("detail").show(ui, |ui| {
-                match self.selected_row.and_then(|i| self.rows.get(i)) {
-                    Some(row) => {
-                        ui.label(RichText::new(format!("Row #{}", row.index)).strong());
-                        ui.add_space(6.0);
-                        ui.label(RichText::new("Key").strong());
-                        show_display_value(ui, &row.key);
-                        ui.add_space(8.0);
-                        ui.label(RichText::new("Value").strong());
-                        show_display_value(ui, &row.value);
-                    }
-                    None => {
-                        ui.label("Click a row to see the full key and value.");
-                    }
-                }
-            });
         });
     }
 }
 
 fn preview_value(value: &DisplayValue) -> String {
     const MAX: usize = 48;
-    let source = match value.text.as_deref() {
-        Some(text) if !text.is_empty() => text,
-        _ => value.hex.as_str(),
-    };
-    if source.chars().count() <= MAX {
-        return source.to_owned();
+    match value.text.as_deref() {
+        Some(text) if !text.is_empty() => {
+            if text.chars().count() <= MAX {
+                text.to_owned()
+            } else {
+                let trimmed: String = text.chars().take(MAX).collect();
+                format!("{trimmed}…")
+            }
+        }
+        _ => "not text".to_owned(),
     }
-    let trimmed: String = source.chars().take(MAX).collect();
-    format!("{trimmed}…")
 }
 
-fn show_display_value(ui: &mut egui::Ui, value: &DisplayValue) {
+fn show_text_value(ui: &mut egui::Ui, value: &DisplayValue) {
     ui.label(format!("Size: {} bytes", value.raw_len));
     match value.text.as_deref() {
         Some(text) if !text.is_empty() => {
-            ui.label("Text:");
             ui.label(RichText::new(text).monospace());
         }
-        _ => {
-            ui.label("Text: (not readable as text)");
+        Some(_) => {
+            ui.label(
+                RichText::new("Empty text.")
+                    .italics()
+                    .color(Color32::GRAY),
+            );
+        }
+        None => {
+            ui.label(
+                RichText::new("Not text — these bytes are not valid UTF-8.")
+                    .italics()
+                    .color(Color32::GRAY),
+            );
         }
     }
-    ui.label("Hex:");
-    ui.label(RichText::new(&value.hex).monospace());
 }
 
 fn plain_error(lead: &str, err: &ViewError) -> String {
