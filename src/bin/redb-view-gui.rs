@@ -5,8 +5,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use eframe::egui::{self, Color32, CursorIcon, RichText, ScrollArea, Sense, TextWrapMode, Vec2, Visuals};
-use eframe::{NativeOptions, Theme};
+use eframe::egui::{self, Color32, CursorIcon, RichText, ScrollArea, Sense, TextWrapMode, Vec2};
+use eframe::NativeOptions;
 use redb_view::{DatabaseView, DisplayValue, KvRow, TableInfo, TableKind, ViewError};
 
 const SPLITTER_THICKNESS: f32 = 6.0;
@@ -19,11 +19,8 @@ const ZOOM_STEP: f32 = 0.1;
 const C0_DIVIDER: &str = " | ";
 
 fn main() -> eframe::Result<()> {
-    // follow_system_theme: needed on Linux so OS theme reaches frame.info().system_theme.
-    let options = NativeOptions {
-        follow_system_theme: true,
-        ..NativeOptions::default()
-    };
+    // OS theme is delivered through egui input each frame.
+    let options = NativeOptions::default();
     eframe::run_native(
         "redb View",
         options,
@@ -167,8 +164,8 @@ impl App {
 
         if let Some(info) = self.tables.iter().find(|t| t.name == name) {
             if info.kind == TableKind::Multimap {
-                self.status =
-                    "This table type (multimap) cannot be paged yet. Pick another table.".to_owned();
+                self.status = "This table type (multimap) cannot be paged yet. Pick another table."
+                    .to_owned();
                 return;
             }
         }
@@ -232,37 +229,36 @@ impl App {
         save_zoom(self.zoom);
     }
 
-    fn apply_theme(&self, ctx: &egui::Context, frame: &eframe::Frame) {
-        let visuals = match self.theme {
-            ThemeChoice::Light => Visuals::light(),
-            ThemeChoice::Dark => Visuals::dark(),
-            ThemeChoice::System => match frame.info().system_theme {
-                Some(Theme::Dark) => Visuals::dark(),
-                Some(Theme::Light) | None => Visuals::light(),
+    fn apply_theme(&self, ctx: &egui::Context) {
+        // Light, dark, or the OS theme. An unknown OS theme falls back to light.
+        let preference = match self.theme {
+            ThemeChoice::Light => egui::ThemePreference::Light,
+            ThemeChoice::Dark => egui::ThemePreference::Dark,
+            ThemeChoice::System => match ctx.system_theme() {
+                Some(egui::Theme::Dark) => egui::ThemePreference::Dark,
+                Some(egui::Theme::Light) | None => egui::ThemePreference::Light,
             },
         };
-        ctx.set_visuals(visuals);
+        ctx.set_theme(preference);
     }
 }
 
 impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        self.apply_theme(ctx, frame);
-        ctx.set_pixels_per_point(self.zoom);
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.apply_theme(ui.ctx());
+        ui.ctx().set_zoom_factor(self.zoom);
 
-        egui::TopBottomPanel::top("open_bar").show(ctx, |ui| {
+        egui::Panel::top("open_bar").show(ui, |ui| {
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 ui.heading("redb View");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    egui::ComboBox::from_id_source("theme_choice")
+                    egui::ComboBox::from_id_salt("theme_choice")
                         .selected_text(format!("Theme: {}", self.theme.as_label()))
                         .show_ui(ui, |ui| {
-                            for choice in [
-                                ThemeChoice::System,
-                                ThemeChoice::Light,
-                                ThemeChoice::Dark,
-                            ] {
+                            for choice in
+                                [ThemeChoice::System, ThemeChoice::Light, ThemeChoice::Dark]
+                            {
                                 if ui
                                     .selectable_label(self.theme == choice, choice.as_label())
                                     .clicked()
@@ -300,11 +296,11 @@ impl eframe::App for App {
         });
 
         // Left/right: tables vs main view — native egui resizable side panel.
-        egui::SidePanel::left("tables")
+        egui::Panel::left("tables")
             .resizable(true)
-            .default_width(220.0)
-            .width_range(140.0..=520.0)
-            .show(ctx, |ui| {
+            .default_size(220.0)
+            .size_range(140.0..=520.0)
+            .show(ui, |ui| {
                 ui.heading("Tables");
                 if self.tables.is_empty() {
                     ui.label("No tables yet.");
@@ -329,7 +325,7 @@ impl eframe::App for App {
                 }
             });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.heading("Rows");
                 ui.add_space(12.0);
@@ -348,8 +344,8 @@ impl eframe::App for App {
             ui.add_space(4.0);
 
             let available = ui.available_size();
-            let max_row_height =
-                (available.y - SPLITTER_THICKNESS - MIN_DETAIL_PANEL_HEIGHT).max(MIN_ROW_PANEL_HEIGHT);
+            let max_row_height = (available.y - SPLITTER_THICKNESS - MIN_DETAIL_PANEL_HEIGHT)
+                .max(MIN_ROW_PANEL_HEIGHT);
             self.row_panel_height = self
                 .row_panel_height
                 .clamp(MIN_ROW_PANEL_HEIGHT, max_row_height);
@@ -360,7 +356,7 @@ impl eframe::App for App {
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
                     ScrollArea::both()
-                        .id_source("row_list")
+                        .id_salt("row_list")
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
                             ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
@@ -404,7 +400,7 @@ impl eframe::App for App {
             // Bottom: detail (UTF-8 text only — never hex; C0 sanitized for display)
             ui.heading("Details");
             ScrollArea::both()
-                .id_source("detail")
+                .id_salt("detail")
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
@@ -455,11 +451,7 @@ fn show_text_value(ui: &mut egui::Ui, value: &DisplayValue) {
             ui.label(RichText::new(shown).monospace());
         }
         Some(_) => {
-            ui.label(
-                RichText::new("Empty text.")
-                    .italics()
-                    .color(Color32::GRAY),
-            );
+            ui.label(RichText::new("Empty text.").italics().color(Color32::GRAY));
         }
         None => {
             ui.label(
