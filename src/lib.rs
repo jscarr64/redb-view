@@ -133,7 +133,8 @@ impl DatabaseView {
 
     /// Page `limit` rows starting at `offset` (0-based) from a normal table.
     ///
-    /// Key/value types are detected by probing common `TableDefinition` layouts.
+    /// Key/value types are detected by probing common `TableDefinition` layouts,
+    /// including `&str` with integers and integers with `&str`.
     ///
     /// # Errors
     ///
@@ -157,46 +158,47 @@ impl DatabaseView {
             .begin_read()
             .map_err(|err| ViewError::msg(format!("begin_read: {err}")))?;
 
-        if let Ok(rows) =
-            page_typed::<&[u8], &[u8], _, _>(&txn, table, offset, limit, disp_bytes, disp_bytes)
-        {
-            return Ok(rows);
+        macro_rules! probe {
+            ($key:ty, $value:ty, $map_key:path, $map_value:path) => {
+                if let Ok(rows) = page_typed::<$key, $value, _, _>(
+                    &txn, table, offset, limit, $map_key, $map_value,
+                ) {
+                    return Ok(rows);
+                }
+            };
         }
-        if let Ok(rows) =
-            page_typed::<u64, &[u8], _, _>(&txn, table, offset, limit, disp_u64, disp_bytes)
-        {
-            return Ok(rows);
-        }
-        if let Ok(rows) =
-            page_typed::<u64, &str, _, _>(&txn, table, offset, limit, disp_u64, disp_str)
-        {
-            return Ok(rows);
-        }
-        if let Ok(rows) =
-            page_typed::<&str, &[u8], _, _>(&txn, table, offset, limit, disp_str, disp_bytes)
-        {
-            return Ok(rows);
-        }
-        if let Ok(rows) =
-            page_typed::<&str, &str, _, _>(&txn, table, offset, limit, disp_str, disp_str)
-        {
-            return Ok(rows);
-        }
-        if let Ok(rows) =
-            page_typed::<u32, &[u8], _, _>(&txn, table, offset, limit, disp_u32, disp_bytes)
-        {
-            return Ok(rows);
-        }
-        if let Ok(rows) =
-            page_typed::<u128, &[u8], _, _>(&txn, table, offset, limit, disp_u128, disp_bytes)
-        {
-            return Ok(rows);
-        }
-        if let Ok(rows) =
-            page_typed::<u64, u64, _, _>(&txn, table, offset, limit, disp_u64, disp_u64)
-        {
-            return Ok(rows);
-        }
+
+        probe!(&[u8], &[u8], disp_bytes, disp_bytes);
+        probe!(u64, &[u8], disp_u64, disp_bytes);
+        probe!(u64, &str, disp_u64, disp_str);
+        probe!(&str, &[u8], disp_str, disp_bytes);
+        probe!(&str, &str, disp_str, disp_str);
+        probe!(u32, &[u8], disp_u32, disp_bytes);
+        probe!(u128, &[u8], disp_u128, disp_bytes);
+        probe!(u64, u64, disp_u64, disp_u64);
+
+        // `&str` keys with integer values.
+        probe!(&str, u8, disp_str, disp_u8);
+        probe!(&str, u16, disp_str, disp_u16);
+        probe!(&str, u32, disp_str, disp_u32);
+        probe!(&str, u64, disp_str, disp_u64);
+        probe!(&str, u128, disp_str, disp_u128);
+        probe!(&str, i8, disp_str, disp_i8);
+        probe!(&str, i16, disp_str, disp_i16);
+        probe!(&str, i32, disp_str, disp_i32);
+        probe!(&str, i64, disp_str, disp_i64);
+        probe!(&str, i128, disp_str, disp_i128);
+
+        // Integer keys with `&str` values. `u64` → `&str` is probed above.
+        probe!(u8, &str, disp_u8, disp_str);
+        probe!(u16, &str, disp_u16, disp_str);
+        probe!(u32, &str, disp_u32, disp_str);
+        probe!(u128, &str, disp_u128, disp_str);
+        probe!(i8, &str, disp_i8, disp_str);
+        probe!(i16, &str, disp_i16, disp_str);
+        probe!(i32, &str, disp_i32, disp_str);
+        probe!(i64, &str, disp_i64, disp_str);
+        probe!(i128, &str, disp_i128, disp_str);
 
         Err(ViewError::msg(format!(
             "table {table}: unsupported or missing key/value types (tried common layouts)"
@@ -257,32 +259,29 @@ fn disp_str(value: &str) -> DisplayValue {
     }
 }
 
-fn disp_u64(value: u64) -> DisplayValue {
-    let bytes = value.to_le_bytes();
-    DisplayValue {
-        text: Some(value.to_string()),
-        hex: to_hex(&bytes),
-        raw_len: bytes.len(),
-    }
+macro_rules! disp_int {
+    ($fn_name:ident, $ty:ty) => {
+        fn $fn_name(value: $ty) -> DisplayValue {
+            let bytes = value.to_le_bytes();
+            DisplayValue {
+                text: Some(value.to_string()),
+                hex: to_hex(&bytes),
+                raw_len: bytes.len(),
+            }
+        }
+    };
 }
 
-fn disp_u32(value: u32) -> DisplayValue {
-    let bytes = value.to_le_bytes();
-    DisplayValue {
-        text: Some(value.to_string()),
-        hex: to_hex(&bytes),
-        raw_len: bytes.len(),
-    }
-}
-
-fn disp_u128(value: u128) -> DisplayValue {
-    let bytes = value.to_le_bytes();
-    DisplayValue {
-        text: Some(value.to_string()),
-        hex: to_hex(&bytes),
-        raw_len: bytes.len(),
-    }
-}
+disp_int!(disp_u8, u8);
+disp_int!(disp_u16, u16);
+disp_int!(disp_u32, u32);
+disp_int!(disp_u64, u64);
+disp_int!(disp_u128, u128);
+disp_int!(disp_i8, i8);
+disp_int!(disp_i16, i16);
+disp_int!(disp_i32, i32);
+disp_int!(disp_i64, i64);
+disp_int!(disp_i128, i128);
 
 fn from_bytes(bytes: &[u8]) -> DisplayValue {
     DisplayValue {

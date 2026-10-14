@@ -1,7 +1,8 @@
 [package]
 name = "redb-view"
-version = "1.0.1"
+version = "1.1.0"
 edition = "2021"
+rust-version = "1.99"
 authors = ["Jeffrey S Carr <jscarr1964@gmail.com>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/jscarr64/redb-view"
@@ -14,9 +15,17 @@ categories = ["database", "command-line-utilities", "development-tools"]
 
 [dependencies]
 redb = "4.3"
-eframe = { version = "0.28", optional = true }
-egui = { version = "0.28", optional = true }
-rfd = { version = "0.15", optional = true }
+# wgpu has been eframe's default renderer since 0.34. This viewer does not
+# use OpenGL, so glow stays off. links and inspection stay off too.
+eframe = { version = "0.36.2", optional = true, default-features = false, features = [
+    "accesskit",
+    "default_fonts",
+    "wgpu",
+    "wayland",
+    "x11",
+] }
+egui = { version = "0.36.2", optional = true }
+rfd = { version = "0.17.2", optional = true }
 
 [features]
 default = []
