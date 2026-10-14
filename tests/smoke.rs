@@ -208,31 +208,28 @@ fn cli_pages_str_u64_and_u64_str() {
     let dir = temp_dir("text-num-cli");
     let path = dir.join("t.redb");
     write_text_number_db(&path);
-    // `cargo clippy --all-targets` checks this file without building the binary,
-    // so the path is present only when `cargo test` compiles the integration test.
-    if let Some(bin) = option_env!("CARGO_BIN_EXE_redb_view") {
-        let path = path.display().to_string();
+    let bin = env!("CARGO_BIN_EXE_redb-view");
+    let path = path.display().to_string();
 
-        let str_u64 = Command::new(bin)
-            .args([&path, "page", "str_u64"])
-            .output()
-            .unwrap();
-        assert!(str_u64.status.success());
-        assert_eq!(
-            String::from_utf8(str_u64.stdout).unwrap(),
-            "index\tkey\tvalue\n0\talpha\t10\n1\tbeta\t20\n"
-        );
+    let str_u64 = Command::new(bin)
+        .args([&path, "page", "str_u64"])
+        .output()
+        .unwrap();
+    assert!(str_u64.status.success());
+    assert_eq!(
+        String::from_utf8(str_u64.stdout).unwrap(),
+        "index\tkey\tvalue\n0\talpha\t10\n1\tbeta\t20\n"
+    );
 
-        let u64_str = Command::new(bin)
-            .args([&path, "page", "u64_str", "--offset", "1", "--limit", "1"])
-            .output()
-            .unwrap();
-        assert!(u64_str.status.success());
-        assert_eq!(
-            String::from_utf8(u64_str.stdout).unwrap(),
-            "index\tkey\tvalue\n1\t2\ttwo\n"
-        );
-    }
+    let u64_str = Command::new(bin)
+        .args([&path, "page", "u64_str", "--offset", "1", "--limit", "1"])
+        .output()
+        .unwrap();
+    assert!(u64_str.status.success());
+    assert_eq!(
+        String::from_utf8(u64_str.stdout).unwrap(),
+        "index\tkey\tvalue\n1\t2\ttwo\n"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
