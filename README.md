@@ -4,6 +4,8 @@ Browse [redb](https://crates.io/crates/redb) databases from a library or CLI: li
 
 Values that are valid UTF-8 are shown as text; otherwise as hex. No application schema is assumed.
 
+Current version: **1.1.0**. MSRV: Rust 1.99 (`rust-version` in `Cargo.toml`; pinned in `rust-toolchain.toml`).
+
 ## Library
 
 ```rust
