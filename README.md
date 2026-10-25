@@ -1,5 +1,7 @@
 # redb-view
 
+Part of the Accumath project family — developed for Accumath, the pure-Rust, correct-by-construction math engine. This crate is open source; Accumath itself is a separate product.
+
 Browse [redb](https://crates.io/crates/redb) databases from a library or CLI: list tables and page key/value rows.
 
 Values that are valid UTF-8 are shown as text; otherwise as hex. No application schema is assumed.
