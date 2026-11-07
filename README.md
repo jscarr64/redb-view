@@ -1,6 +1,6 @@
 # redb-view
 
-Part of the Accumath project family — developed for Accumath, the pure-Rust, correct-by-construction math engine. This crate is open source; Accumath itself is a separate product.
+Part of the Accumath project family — developed in conjunction with [Accumath](https://www.accumath.net), the pure-Rust, correct-by-construction math engine. This crate is open source; Accumath itself is a separate product. Learn more at [www.accumath.net](https://www.accumath.net).
 
 Browse [redb](https://crates.io/crates/redb) databases from a library or CLI: list tables and page key/value rows.
 
